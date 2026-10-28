@@ -1,0 +1,5 @@
+streamlit>=1.35
+flask>=3.0
+pandas>=2.1
+openpyxl>=3.1
+gunicorn>=22.0
