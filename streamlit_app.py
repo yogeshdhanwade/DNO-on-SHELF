@@ -125,8 +125,10 @@ dno_type = st.radio("DNO Type", ["Temporary", "Permanent"], horizontal=True)
 temp = dno_type == "Temporary"
 reason = st.selectbox("Reason Code", core.TEMPORARY_REASONS if temp else core.PERMANENT_REASONS)
 c1, c2 = st.columns(2)
-start = c1.text_input("Start Date (YYYY-MM-DD)")
-end = c2.text_input("End Date (YYYY-MM-DD)") if temp else ""
+start_d = c1.date_input("Start Date", value=None, format="YYYY-MM-DD")
+end_d = c2.date_input("End Date", value=None, format="YYYY-MM-DD") if temp else None
+start = start_d.isoformat() if start_d else ""
+end = end_d.isoformat() if end_d else ""
 c3, c4 = st.columns(2)
 ship = c3.selectbox("Shippable", ["", "Y", "N"])
 sync = c4.selectbox("Sync Avail Inv", ["", "Y", "N"])
