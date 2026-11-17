@@ -74,6 +74,10 @@ st.caption(f"{len(state['prod_df'])} listing rows - {len(state['marketplaces'])}
 st.header("Step 2 - Checkup")
 modes = [m for m in core.MODES if caps.get(m, True)]
 mode = st.radio("Mode", modes, format_func=MODE_LABELS.get, horizontal=True)
+hidden = [MODE_LABELS[m] for m in core.MODES if m not in modes]
+if hidden:
+    st.caption("Not available for this portfolio (column not found): " + ", ".join(hidden))
+    st.caption("Columns found in Product Listings: " + ", ".join(map(str, state["prod_df"].columns)))
 brand = st.text_input("Brand (used in file names)")
 scope = st.radio("Scope", ["All Listing IDs", "Specific Listing IDs"], horizontal=True)
 mps, sellers = [], []
