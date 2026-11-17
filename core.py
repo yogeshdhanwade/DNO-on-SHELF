@@ -8,7 +8,7 @@ from datetime import datetime
 import pandas as pd
 from openpyxl import load_workbook
 
-MODES = ("sku", "asin", "item_id", "secondary_id", "master_id", "mpn")
+MODES = ("mpn", "master_id", "sku", "page_id", "secondary_id")
 
 TEMPORARY_REASONS = [
     "Excess Inventory", "Listing Issues", "Ongoing Negotiations",
@@ -185,8 +185,7 @@ def detect_brand(master_df, master_cols):
 def capabilities(state):
     mc = state["master_cols"]
     return {
-        "asin": state["cols"]["asin"] is not None,
-        "item_id": state["cols"]["asin"] is not None,
+        "page_id": state["cols"]["asin"] is not None,
         "secondary_id": state["cols"].get("secondary_id") is not None,
         "mpn": bool(state["master_df"] is not None and mc.get("mpn") and mc.get("master_id")),
     }
@@ -199,10 +198,8 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
         raise ValueError(f"Unknown mode: {mode}")
     cols, prod = state["cols"], state["prod_df"]
     caps = capabilities(state)
-    if mode == "asin" and not caps["asin"]:
-        raise ValueError("ASIN / listing_mp_page_id column not found in Product Listings; ASIN mode unavailable.")
-    if mode == "item_id" and not caps["item_id"]:
-        raise ValueError("Marketplace Page ID column not found in Product Listings; Item ID mode unavailable.")
+    if mode == "page_id" and not caps["page_id"]:
+        raise ValueError("Marketplace Page ID column not found in Product Listings; Page ID mode unavailable.")
     if mode == "secondary_id" and not caps["secondary_id"]:
         raise ValueError("Secondary ID column not found in Product Listings; Secondary ID mode unavailable.")
     if mode == "mpn" and not caps["mpn"]:
@@ -240,13 +237,8 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
     for v in values:
         if mode == "sku":
             rows += rows_for(prod[prod[cols["sku"]] == v], {}, empty_sku=v)
-        elif mode == "asin":
-            rows += rows_for(prod[prod[cols["asin"]] == v], {"asin": v})
-        elif mode == "item_id":
-            base = prod[prod[cols["asin"]] == v]
-            if cols.get("page_type"):  # only rows whose page-id type is "Item ID"
-                base = base[base[cols["page_type"]].map(_key) == "itemid"]
-            rows += rows_for(base, {"item_id": v})
+        elif mode == "page_id":  # ASIN, Item ID, etc. all live in Marketplace Page ID
+            rows += rows_for(prod[prod[cols["asin"]] == v], {"page_id": v})
         elif mode == "secondary_id":
             sec = prod[cols["secondary_id"]].map(_strip_zeros)
             rows += rows_for(prod[sec == _strip_zeros(v)], {"secondary_id": v})
