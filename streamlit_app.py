@@ -2,12 +2,14 @@
 
 Run:  streamlit run streamlit_app.py
 """
+import base64
 import io
 import os
 from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 import core
 
@@ -138,9 +140,7 @@ dno_type = st.radio("DNO Type", ["Temporary", "Permanent", "UN - DNO"], horizont
 undno = dno_type == "UN - DNO"
 temp = dno_type == "Temporary"
 reason, start, end, note = "", "", "", ""
-if undno:
-    st.info("UN - DNO marks every DNO attribute (note, reason code, temporary flag, start and end date) as <<Delete>>.")
-else:
+if not undno:
     reason = st.selectbox("Reason Code", core.TEMPORARY_REASONS if temp else core.PERMANENT_REASONS)
     c1, c2 = st.columns(2)
     start_d = c1.date_input("Start Date", value=None, format="YYYY-MM-DD")
@@ -159,13 +159,14 @@ if st.button("Generate UN-DNO File" if undno else "Generate DNO File", type="pri
     try:
         data = core.generate_dno(io.BytesIO(store["bytes"]), listing_ids, cfg)
         out_name = f"{safe_brand}_{sku_count}_UN-DNO.xlsx" if undno else f"{safe_brand}_{sku_count}_{dno_type} DNO.xlsx"
-        ss["dno_file"] = (data, out_name)
+        st.success(f"{out_name} generated - {len(listing_ids)} listing ID(s). Downloading...")
+        # trigger the browser download straight away (no extra download button)
+        b64 = base64.b64encode(data).decode()
+        components.html(
+            f'<a id="dl" download="{out_name}" '
+            f'href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}"></a>'
+            '<script>document.getElementById("dl").click();</script>',
+            height=0,
+        )
     except ValueError as e:
-        ss.pop("dno_file", None)
         st.error(str(e))
-
-if ss.get("dno_file"):
-    data, name = ss["dno_file"]
-    st.success(f"DNO file ready - {len(listing_ids)} listing ID(s).")
-    st.download_button("Download DNO file", data, file_name=name,
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
