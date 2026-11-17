@@ -92,6 +92,19 @@ scope = st.segmented_control("Listing Coverage", [ALL_LIDS, MP_LIDS],
 mps, sellers = [], []
 if scope == MP_LIDS:
     c1, c2 = st.columns(2)
+    # a soft colour per marketplace tag (by name; position-based as a fallback)
+    palette = ["#2dd4bf", "#38bdf8", "#a78bfa", "#fb7185", "#fbbf24",
+               "#34d399", "#fb923c", "#f472b6", "#a3e635", "#818cf8"]
+    css = []
+    for i, c in enumerate(palette, 1):
+        css.append(f'.st-key-sel_mps [data-baseweb="tag"]:nth-child({len(palette)}n+{i})'
+                   f'{{background:{c}33 !important;color:{c} !important;border:1px solid {c}88;}}')
+    for i, name in enumerate(state["marketplaces"]):
+        c = palette[i % len(palette)]
+        safe = name.replace("\\", "\\\\").replace('"', '\\"')
+        css.append(f'.st-key-sel_mps [data-baseweb="tag"]:has(span[title="{safe}"])'
+                   f'{{background:{c}33 !important;color:{c} !important;border:1px solid {c}88;}}')
+    st.markdown("<style>" + "".join(css) + "</style>", unsafe_allow_html=True)
     mps = c1.multiselect("Marketplace(s)", state["marketplaces"], key="sel_mps")
     # only sellers that sell in the chosen marketplaces
     seller_opts = sorted({s for mp in mps for s in state["sellers_by_mp"].get(mp, [])})
@@ -120,13 +133,30 @@ found = [r for r in rows if r["listing_id"]]
 listing_ids = list(dict.fromkeys(r["listing_id"] for r in found))
 sku_count = len({r["sku"] for r in found if r["sku"]})
 st.write(f"**{len(listing_ids)}** unique listing ID(s); {len(rows) - len(found)} input(s) with no match.")
-st.dataframe(pd.DataFrame(rows), use_container_width=True, height=300)
 safe_brand = "".join(c for c in ss["brand"] if c.isalnum() or c in ("_", "-", " ")).strip() or "Brand"
-st.download_button(
-    "Download Checkup (.xlsx)", core.checkup_to_xlsx(rows),
-    file_name=f"Checkup_{safe_brand}_{datetime.now():%Y%m%d_%H%M%S}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-)
+
+# Results table: rows are grouped by Master ID, and Master IDs that cover 2+ SKUs share one colour.
+df = pd.DataFrame(rows)
+front = [c for c in ("mpn", "page_id", "secondary_id", "master_id", "sku") if c in df.columns]
+df = df[front + [c for c in df.columns if c not in front]]
+if "master_id" in df.columns:
+    # group by Master ID; rows with no Master ID (no match) go last
+    df = df.sort_values("master_id", kind="stable", key=lambda s: s.where(s != "", "￿")).reset_index(drop=True)
+    multi = df[df["master_id"] != ""].groupby("master_id")["sku"].nunique()
+    multi = [m for m, n in multi.items() if n > 1]
+    tints = ["#2dd4bf", "#38bdf8", "#a78bfa", "#fb7185", "#fbbf24", "#34d399", "#fb923c", "#f472b6"]
+    tint_of = {m: tints[i % len(tints)] for i, m in enumerate(multi)}
+
+    def tint_row(row):
+        c = tint_of.get(row["master_id"])
+        return [f"background-color: {c}2e" if c else ""] * len(row)
+
+    shown = df.style.apply(tint_row, axis=1)
+    if multi:
+        st.caption("Rows sharing a colour are SKUs under the same Master ID.")
+else:
+    shown = df
+st.dataframe(shown, use_container_width=True, hide_index=True, height=min(600, 38 * (len(df) + 1) + 3))
 if not listing_ids:
     st.stop()
 

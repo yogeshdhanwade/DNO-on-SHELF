@@ -225,13 +225,14 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
         """key: dict of leading columns identifying the input value."""
         base = in_scope(base)
         if base.empty:
-            return [{**key, "listing_id": "", "sku": empty_sku, "marketplace": "", "seller_account": "", "count": 0}]
+            return [{**key, "master_id": key.get("master_id", ""), "listing_id": "", "sku": empty_sku, "marketplace": "", "seller_account": "", "count": 0}]
         out = []
         for (mp, seller), sub in base.groupby([cols["marketplace"], cols["seller"]], sort=True):
             lids = sub[cols["listing_id"]].replace("", pd.NA).dropna().astype(str).unique().tolist()
             for lid in lids:
                 rep = sub[sub[cols["listing_id"]] == lid].iloc[0]
-                out.append({**key, "listing_id": safe_str(lid), "sku": safe_str(rep[cols["sku"]]),
+                out.append({**key, "master_id": safe_str(rep[cols["master"]]),
+                            "listing_id": safe_str(lid), "sku": safe_str(rep[cols["sku"]]),
                             "marketplace": safe_str(mp), "seller_account": safe_str(seller),
                             "count": len(lids)})
         return out
