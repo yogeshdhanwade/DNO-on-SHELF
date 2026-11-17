@@ -33,16 +33,13 @@ if "bytes" not in store and os.path.exists(DEFAULT_TEMPLATE):
 MODE_LABELS = {"sku": "By SKU", "asin": "By ASIN", "item_id": "By Item ID", "secondary_id": "By Secondary ID (UPC/GTIN)","master_id": "By Master ID", "mpn": "By MPN"}
 
 
-# ---------- Step 0: template ----------
-st.header("Step 0 - DNO template")
-if "bytes" in store:
-    st.success(f"Template loaded: {store['name']}")
-else:
+st.caption("Upload a brand portfolio, pick how to look up listings, then download the DNO upload file.")
+if "bytes" not in store:
     st.error("DNO_Template.xlsx not found in the repository. Add it next to streamlit_app.py on GitHub.")
 
-# ---------- Step 1: portfolio ----------
-st.header("Step 1 - Portfolio file")
-pf = st.file_uploader("Portfolio (.xlsx with Product Listings & optional Master Products)",
+# ---------- Upload ----------
+st.header("Upload Brand Portfolio")
+pf = st.file_uploader("Brand portfolio (.xlsx with Product Listings & optional Master Products)",
                       type=["xlsx", "xlsm"], key="pf")
 if pf is not None:
     key = (pf.name, pf.size)
@@ -67,10 +64,10 @@ caps = core.capabilities(state)
 st.caption(f"{len(state['prod_df'])} listing rows - {len(state['marketplaces'])} marketplace(s) - "
            f"{len(state['sellers'])} seller(s)")
 
-# ---------- Step 2: checkup ----------
-st.header("Step 2 - Checkup")
+# ---------- Find listings ----------
+st.header("Find Listing IDs")
 modes = [m for m in core.MODES if caps.get(m, True)]
-mode = st.radio("Mode", modes, format_func=MODE_LABELS.get, horizontal=True)
+mode = st.radio("Look up listings by", modes, format_func=MODE_LABELS.get, horizontal=True)
 hidden = [MODE_LABELS[m] for m in core.MODES if m not in modes]
 if hidden:
     st.caption("Not available for this portfolio (column not found): " + ", ".join(hidden))
@@ -91,7 +88,7 @@ hint = " - leave blank to use all from Master Products" if mode == "mpn" else ""
 noun = {"secondary_id": "Secondary IDs (UPC / GTIN)"}.get(mode, MODE_LABELS[mode][3:] + "s")
 values = st.text_area(f"{noun} (comma / newline separated){hint}", height=120)
 
-if st.button("Create Checkup", type="primary"):
+if st.button("Find Listing IDs", type="primary"):
     ss.pop("dno_file", None)
     try:
         rows = core.build_checkup(state, mode, core.parse_values(values),
@@ -120,10 +117,10 @@ st.download_button(
 if not listing_ids:
     st.stop()
 
-# ---------- Step 3: DNO ----------
-st.header("Step 3 - DNO configuration")
+# ---------- DNO ----------
+st.header("DNO Settings")
 if "bytes" not in store:
-    st.warning("DNO template is missing (see Step 0).")
+    st.warning("DNO template is missing from the repository.")
     st.stop()
 
 dno_type = st.radio("DNO Type", ["Temporary", "Permanent"], horizontal=True)
@@ -139,7 +136,7 @@ ship = c3.selectbox("Shippable", ["", "Y", "N"])
 sync = c4.selectbox("Sync Avail Inv", ["", "Y", "N"])
 note = st.text_input("DNO Note (optional)")
 
-if st.button("Confirm & Generate DNO Upload", type="primary"):
+if st.button("Generate DNO File", type="primary"):
     cfg = {"temporary": temp, "reason": reason, "start": start, "end": end,
            "shippable": ship, "sync_inv": sync, "note": note}
     try:
@@ -151,6 +148,6 @@ if st.button("Confirm & Generate DNO Upload", type="primary"):
 
 if ss.get("dno_file"):
     data, name = ss["dno_file"]
-    st.success(f"DNO Upload file generated. Rows written: {len(listing_ids)}")
+    st.success(f"DNO file ready - {len(listing_ids)} listing ID(s).")
     st.download_button("Download DNO file", data, file_name=name,
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
