@@ -1,4 +1,4 @@
-"""Shelf Auto-DNO - Streamlit app (uses core.py).
+"""Product Catalog Auto-DNO on Shelf - Streamlit app (uses core.py).
 
 Run:  streamlit run streamlit_app.py
 """
@@ -13,8 +13,8 @@ import streamlit.components.v1 as components
 
 import core
 
-st.set_page_config(page_title="Shelf Auto-DNO", layout="wide")
-st.title("Shelf Auto-DNO")
+st.set_page_config(page_title="Product Catalog Auto-DNO on Shelf", layout="wide")
+st.title("Product Catalog Auto-DNO on Shelf")
 st.caption("Bulk DNO & un-DNO for Shelf LIDs")
 
 
