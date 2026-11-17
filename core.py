@@ -8,7 +8,7 @@ from datetime import datetime
 import pandas as pd
 from openpyxl import load_workbook
 
-MODES = ("sku", "asin", "item_id", "master_id", "mpn")
+MODES = ("sku", "asin", "item_id", "secondary_id", "master_id", "mpn")
 
 TEMPORARY_REASONS = [
     "Excess Inventory", "Listing Issues", "Ongoing Negotiations",
@@ -90,8 +90,21 @@ PROD_REQUIRED = {
                "sellername", "seller_id", "sellerid"],
     "master": ["master_id", "masterid", "master"],
 }
-ASIN_CANDIDATES = ["listing_mp_page_id", "listing_mp_pageid", "mp_page_id", "page_id", "asin", "mp_pageid"]
-ITEM_ID_CANDIDATES = ["listing_mp_item_id", "listing_mp_itemid", "mp_item_id", "listing_item_id", "item_id", "itemid"]
+# "Marketplace Page ID" holds the ASIN / Item ID value; "Marketplace Page ID Type" says which kind it is.
+ASIN_CANDIDATES = ["listing_mp_page_id", "listing_mp_pageid", "marketplace_page_id", "mp_page_id", "page_id", "asin", "mp_pageid"]
+PAGE_TYPE_CANDIDATES = ["listing_mp_page_id_type", "marketplace_page_id_type", "mp_page_id_type", "page_id_type"]
+SECONDARY_ID_CANDIDATES = ["listing_mp_secondary_id", "marketplace_secondary_id", "mp_secondary_id",
+                           "listing_secondary_id", "secondary_id", "secondaryid"]
+
+
+def _key(s):
+    """Lower-case and drop non-alphanumerics: 'Item ID' / 'ITEM_ID' -> 'itemid'."""
+    return "".join(c for c in str(s).lower() if c.isalnum())
+
+
+def _strip_zeros(s):
+    """UPC/GTIN compare ignoring leading zeros (Excel often drops them)."""
+    return str(s).strip().lstrip("0")
 
 
 def load_portfolio(file_like):
@@ -115,8 +128,11 @@ def load_portfolio(file_like):
     if missing:
         raise ValueError(f"Missing required Product Listings columns: {missing}. "
                          f"Found: {list(prod_df.columns)}")
-    cols["asin"] = find_col(prod_norm, ASIN_CANDIDATES)
-    cols["item_id"] = find_col(prod_norm, ITEM_ID_CANDIDATES)
+    # keep "...page_id_type" out of the page-id search so the substring fallback can't pick it
+    page_norm = {k: v for k, v in prod_norm.items() if not k.endswith("_type")}
+    cols["asin"] = find_col(page_norm, ASIN_CANDIDATES)  # the Marketplace Page ID column
+    cols["page_type"] = find_col(prod_norm, PAGE_TYPE_CANDIDATES)
+    cols["secondary_id"] = find_col(prod_norm, SECONDARY_ID_CANDIDATES)
 
     master_df, master_cols = None, {}
     master_sheet = find_sheet_like(
@@ -145,7 +161,8 @@ def capabilities(state):
     mc = state["master_cols"]
     return {
         "asin": state["cols"]["asin"] is not None,
-        "item_id": state["cols"].get("item_id") is not None,
+        "item_id": state["cols"]["asin"] is not None,
+        "secondary_id": state["cols"].get("secondary_id") is not None,
         "mpn": bool(state["master_df"] is not None and mc.get("mpn") and mc.get("master_id")),
     }
 
@@ -160,7 +177,9 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
     if mode == "asin" and not caps["asin"]:
         raise ValueError("ASIN / listing_mp_page_id column not found in Product Listings; ASIN mode unavailable.")
     if mode == "item_id" and not caps["item_id"]:
-        raise ValueError("Item ID column (e.g. listing_mp_item_id) not found in Product Listings; Item ID mode unavailable.")
+        raise ValueError("Marketplace Page ID column not found in Product Listings; Item ID mode unavailable.")
+    if mode == "secondary_id" and not caps["secondary_id"]:
+        raise ValueError("Secondary ID column not found in Product Listings; Secondary ID mode unavailable.")
     if mode == "mpn" and not caps["mpn"]:
         raise ValueError("Master Products sheet or its 'mpn'/'master_id' columns not found; MPN mode unavailable.")
     if not scope_all and (not marketplaces or not sellers):
@@ -199,7 +218,13 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
         elif mode == "asin":
             rows += rows_for(prod[prod[cols["asin"]] == v], {"asin": v})
         elif mode == "item_id":
-            rows += rows_for(prod[prod[cols["item_id"]] == v], {"item_id": v})
+            base = prod[prod[cols["asin"]] == v]
+            if cols.get("page_type"):  # only rows whose page-id type is "Item ID"
+                base = base[base[cols["page_type"]].map(_key) == "itemid"]
+            rows += rows_for(base, {"item_id": v})
+        elif mode == "secondary_id":
+            sec = prod[cols["secondary_id"]].map(_strip_zeros)
+            rows += rows_for(prod[sec == _strip_zeros(v)], {"secondary_id": v})
         elif mode == "master_id":
             rows += rows_for(prod[prod[cols["master"]] == v], {"master_id": v})
         else:  # mpn

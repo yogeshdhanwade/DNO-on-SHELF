@@ -23,7 +23,7 @@ def template_store():
 store = template_store()
 ss = st.session_state
 
-MODE_LABELS = {"sku": "By SKU", "asin": "By ASIN", "item_id": "By Item ID", "master_id": "By Master ID", "mpn": "By MPN"}
+MODE_LABELS = {"sku": "By SKU", "asin": "By ASIN", "item_id": "By Item ID", "secondary_id": "By Secondary ID (UPC/GTIN)","master_id": "By Master ID", "mpn": "By MPN"}
 
 
 # ---------- Step 0: template ----------
@@ -86,7 +86,8 @@ if scope == "Specific Listing IDs":
     mps = c1.multiselect("Marketplace(s)", state["marketplaces"])
     sellers = c2.multiselect("Seller(s)", state["sellers"])
 hint = " - leave blank to use all from Master Products" if mode == "mpn" else ""
-values = st.text_area(f"{MODE_LABELS[mode][3:]}s (comma / newline separated){hint}", height=120)
+noun = {"secondary_id": "Secondary IDs (UPC / GTIN)"}.get(mode, MODE_LABELS[mode][3:] + "s")
+values = st.text_area(f"{noun} (comma / newline separated){hint}", height=120)
 
 if st.button("Create Checkup", type="primary"):
     ss.pop("dno_file", None)
