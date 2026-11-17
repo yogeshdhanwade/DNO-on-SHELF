@@ -24,11 +24,14 @@ def template_store():
 store = template_store()
 ss = st.session_state
 
-# Default template: DNO_Template.xlsx committed next to this file in the repo.
-DEFAULT_TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DNO_Template.xlsx")
-if "bytes" not in store and os.path.exists(DEFAULT_TEMPLATE):
-    with open(DEFAULT_TEMPLATE, "rb") as f:
-        store["bytes"], store["name"] = f.read(), "DNO_Template.xlsx (default)"
+# Default template: any .xlsx with "template" in its name, committed next to this file in the repo.
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if "bytes" not in store:
+    candidates = sorted(n for n in os.listdir(APP_DIR)
+                        if n.lower().endswith(".xlsx") and "template" in n.lower())
+    if candidates:
+        with open(os.path.join(APP_DIR, candidates[0]), "rb") as f:
+            store["bytes"], store["name"] = f.read(), candidates[0]
 
 MODE_LABELS = {"mpn": "MPN", "master_id": "Master ID (MID)", "sku": "SKU",
                "page_id": "Item ID / ASIN", "secondary_id": "GTIN (UPC)"}
@@ -38,7 +41,7 @@ MODE_NOUNS = {"mpn": "MPNs", "master_id": "Master IDs", "sku": "SKUs",
 
 st.caption("Upload a brand portfolio, pick how to look up listings, then download the DNO upload file.")
 if "bytes" not in store:
-    st.error("DNO_Template.xlsx not found in the repository. Add it next to streamlit_app.py on GitHub.")
+    st.error("DNO template not found. Add an .xlsx with 'template' in its name next to streamlit_app.py on GitHub.")
 
 # ---------- Upload ----------
 st.header("Upload Brand Portfolio")
