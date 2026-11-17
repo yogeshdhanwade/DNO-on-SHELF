@@ -37,18 +37,8 @@ MODE_LABELS = {"sku": "By SKU", "asin": "By ASIN", "item_id": "By Item ID", "sec
 st.header("Step 0 - DNO template")
 if "bytes" in store:
     st.success(f"Template loaded: {store['name']}")
-tpl = st.file_uploader("Optional: use a different template for now (.xlsx)", type=["xlsx"], key="tpl")
-if tpl is not None and store.get("name") != tpl.name + str(tpl.size):
-    data = tpl.getvalue()
-    try:
-        from openpyxl import load_workbook
-        wb = load_workbook(io.BytesIO(data))
-        if "Product Listings" not in wb.sheetnames:
-            raise ValueError("Template must contain a 'Product Listings' sheet.")
-        store["bytes"], store["name"] = data, tpl.name + str(tpl.size)
-        st.rerun()
-    except Exception as e:
-        st.error(f"Invalid template: {e}")
+else:
+    st.error("DNO_Template.xlsx not found in the repository. Add it next to streamlit_app.py on GitHub.")
 
 # ---------- Step 1: portfolio ----------
 st.header("Step 1 - Portfolio file")
@@ -130,7 +120,7 @@ if not listing_ids:
 # ---------- Step 3: DNO ----------
 st.header("Step 3 - DNO configuration")
 if "bytes" not in store:
-    st.warning("Upload the DNO template in Step 0 first.")
+    st.warning("DNO template is missing (see Step 0).")
     st.stop()
 
 dno_type = st.radio("DNO Type", ["Temporary", "Permanent"], horizontal=True)
