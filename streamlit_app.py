@@ -11,25 +11,9 @@ import streamlit as st
 
 import core
 
-st.set_page_config(page_title="Shelf DNO Automation Tool", page_icon="🗂️", layout="wide")
-st.markdown("""
-<style>
-.block-container { max-width: 1100px; padding-top: 2rem; }
-.hero { background: linear-gradient(120deg, #4f46e5 0%, #0ea5a4 100%); color: #fff;
-        border-radius: 16px; padding: 22px 28px; margin-bottom: 12px; }
-.hero h1 { margin: 0; padding: 0; font-size: 2rem; color: #fff; }
-.hero p { margin: 4px 0 0; opacity: .92; }
-h2 { border-left: 5px solid #4f46e5; padding-left: 12px !important; }
-div[data-testid="stMetric"] { background: rgba(128,128,128,.10); border-radius: 12px; padding: 10px 14px; }
-div.stButton > button[kind="primary"] { background: linear-gradient(120deg, #4f46e5, #0ea5a4);
-        border: 0; color: #fff; font-weight: 600; }
-.badge { display: inline-block; padding: 3px 12px; border-radius: 999px; font-weight: 700; font-size: .85rem; }
-.badge.temp { background: rgba(245,158,11,.2); color: #b45309; }
-.badge.perm { background: rgba(239,68,68,.18); color: #b91c1c; }
-</style>
-<div class="hero"><h1>🗂️ Shelf DNO Automation Tool</h1>
-<p>Upload a brand portfolio, find the listing IDs, download the DNO file.</p></div>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="Shelf DNO Automation Tool", layout="wide")
+st.title("Shelf DNO Automation Tool")
+st.caption("Upload a brand portfolio, pick how to look up listings, then download the DNO upload file.")
 
 
 @st.cache_resource
@@ -60,7 +44,7 @@ if "bytes" not in store:
     st.error("DNO template not found. Add an .xlsx with 'template' in its name next to streamlit_app.py on GitHub.")
 
 # ---------- Upload ----------
-st.header("📁 Upload Brand Portfolio")
+st.header("Upload Brand Portfolio")
 pf = st.file_uploader("Brand portfolio (.xlsx with Product Listings & optional Master Products)",
                       type=["xlsx", "xlsm"], key="pf")
 if pf is not None:
@@ -84,16 +68,11 @@ if not state:
 
 caps = core.capabilities(state)
 brand = state.get("brand") or os.path.splitext(ss.get("pf_key", ("Brand",))[0])[0]
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Brand", brand)
-m2.metric("Listings", f"{len(state['prod_df']):,}")
-m3.metric("Marketplaces", len(state["marketplaces"]))
-m4.metric("Sellers", len(state["sellers"]))
-if not state.get("brand"):
-    st.caption("Brand taken from the portfolio file name (no brand column found).")
+st.caption(f"{len(state['prod_df'])} listing rows - {len(state['marketplaces'])} marketplace(s) - "
+           f"{len(state['sellers'])} seller(s)")
 
 # ---------- Find listings ----------
-st.header("🔎 Find Listing IDs")
+st.header("Find Listing IDs")
 modes = [m for m in core.MODES if caps.get(m, True)]
 mode = st.segmented_control("Look up listings by", modes, default=modes[0],
                             format_func=MODE_LABELS.get, key="mode")
@@ -102,9 +81,9 @@ if mode is None:  # user clicked the selected option again
     st.stop()
 hidden = [MODE_LABELS[m] for m in core.MODES if m not in modes]
 if hidden:
-    with st.expander("Some options aren't available for this portfolio"):
-        st.write("Column not found for: " + ", ".join(hidden))
-        st.caption("Columns in Product Listings: " + ", ".join(map(str, state["prod_df"].columns)))
+    st.caption("Not available for this portfolio (column not found): " + ", ".join(hidden))
+    st.caption("Columns found in Product Listings: " + ", ".join(map(str, state["prod_df"].columns)))
+st.caption(f"Brand: **{brand}**" + ("" if state.get("brand") else " (taken from the portfolio file name; no brand column found)"))
 scope = st.segmented_control("Scope", ["All Listing IDs", "Specific Listing IDs"],
                              default="All Listing IDs", key="scope") or "All Listing IDs"
 mps, sellers = [], []
@@ -137,12 +116,7 @@ if not rows:
 found = [r for r in rows if r["listing_id"]]
 listing_ids = list(dict.fromkeys(r["listing_id"] for r in found))
 sku_count = len({r["sku"] for r in found if r["sku"]})
-st.header("✅ Results")
-r1, r2, r3, r4 = st.columns(4)
-r1.metric("Listing IDs", f"{len(listing_ids):,}")
-r2.metric("SKUs", f"{sku_count:,}")
-r3.metric("Marketplaces", len({r["marketplace"] for r in found}))
-r4.metric("No match", len(rows) - len(found))
+st.write(f"**{len(listing_ids)}** unique listing ID(s); {len(rows) - len(found)} input(s) with no match.")
 st.dataframe(pd.DataFrame(rows), use_container_width=True, height=300)
 safe_brand = "".join(c for c in ss["brand"] if c.isalnum() or c in ("_", "-", " ")).strip() or "Brand"
 st.download_button(
@@ -154,15 +128,13 @@ if not listing_ids:
     st.stop()
 
 # ---------- DNO ----------
-st.header("⚙️ DNO Settings")
+st.header("DNO Settings")
 if "bytes" not in store:
     st.warning("DNO template is missing from the repository.")
     st.stop()
 
 dno_type = st.radio("DNO Type", ["Temporary", "Permanent"], horizontal=True)
 temp = dno_type == "Temporary"
-st.markdown(f'<span class="badge {"temp" if temp else "perm"}">{dno_type.upper()} DNO</span>',
-            unsafe_allow_html=True)
 reason = st.selectbox("Reason Code", core.TEMPORARY_REASONS if temp else core.PERMANENT_REASONS)
 c1, c2 = st.columns(2)
 start_d = c1.date_input("Start Date", value=None, format="YYYY-MM-DD")
@@ -173,7 +145,6 @@ c3, c4 = st.columns(2)
 ship = c3.selectbox("Shippable", ["", "Y", "N"])
 sync = c4.selectbox("Sync Avail Inv", ["", "Y", "N"])
 note = st.text_input("DNO Note (optional)")
-st.caption(f"File name: `{safe_brand}_{sku_count}_{dno_type} DNO.xlsx`")
 
 if st.button("Generate DNO File", type="primary"):
     cfg = {"temporary": temp, "reason": reason, "start": start, "end": end,
