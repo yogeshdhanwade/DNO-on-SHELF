@@ -3,6 +3,7 @@
 Run:  streamlit run streamlit_app.py
 """
 import io
+import os
 from datetime import datetime
 
 import pandas as pd
@@ -23,14 +24,20 @@ def template_store():
 store = template_store()
 ss = st.session_state
 
+# Default template: DNO_Template.xlsx committed next to this file in the repo.
+DEFAULT_TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DNO_Template.xlsx")
+if "bytes" not in store and os.path.exists(DEFAULT_TEMPLATE):
+    with open(DEFAULT_TEMPLATE, "rb") as f:
+        store["bytes"], store["name"] = f.read(), "DNO_Template.xlsx (default)"
+
 MODE_LABELS = {"sku": "By SKU", "asin": "By ASIN", "item_id": "By Item ID", "secondary_id": "By Secondary ID (UPC/GTIN)","master_id": "By Master ID", "mpn": "By MPN"}
 
 
 # ---------- Step 0: template ----------
 st.header("Step 0 - DNO template")
 if "bytes" in store:
-    st.success(f"Template saved: {store['name']} (reused until the app restarts)")
-tpl = st.file_uploader("Upload / replace formatted DNO template (.xlsx)", type=["xlsx"], key="tpl")
+    st.success(f"Template loaded: {store['name']}")
+tpl = st.file_uploader("Optional: use a different template for now (.xlsx)", type=["xlsx"], key="tpl")
 if tpl is not None and store.get("name") != tpl.name + str(tpl.size):
     data = tpl.getvalue()
     try:
