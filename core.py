@@ -8,7 +8,7 @@ from datetime import datetime
 import pandas as pd
 from openpyxl import load_workbook
 
-MODES = ("sku", "asin", "master_id", "mpn")
+MODES = ("sku", "asin", "item_id", "master_id", "mpn")
 
 TEMPORARY_REASONS = [
     "Excess Inventory", "Listing Issues", "Ongoing Negotiations",
@@ -91,6 +91,7 @@ PROD_REQUIRED = {
     "master": ["master_id", "masterid", "master"],
 }
 ASIN_CANDIDATES = ["listing_mp_page_id", "listing_mp_pageid", "mp_page_id", "page_id", "asin", "mp_pageid"]
+ITEM_ID_CANDIDATES = ["listing_mp_item_id", "listing_mp_itemid", "mp_item_id", "listing_item_id", "item_id", "itemid"]
 
 
 def load_portfolio(file_like):
@@ -115,6 +116,7 @@ def load_portfolio(file_like):
         raise ValueError(f"Missing required Product Listings columns: {missing}. "
                          f"Found: {list(prod_df.columns)}")
     cols["asin"] = find_col(prod_norm, ASIN_CANDIDATES)
+    cols["item_id"] = find_col(prod_norm, ITEM_ID_CANDIDATES)
 
     master_df, master_cols = None, {}
     master_sheet = find_sheet_like(
@@ -143,6 +145,7 @@ def capabilities(state):
     mc = state["master_cols"]
     return {
         "asin": state["cols"]["asin"] is not None,
+        "item_id": state["cols"].get("item_id") is not None,
         "mpn": bool(state["master_df"] is not None and mc.get("mpn") and mc.get("master_id")),
     }
 
@@ -156,6 +159,8 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
     caps = capabilities(state)
     if mode == "asin" and not caps["asin"]:
         raise ValueError("ASIN / listing_mp_page_id column not found in Product Listings; ASIN mode unavailable.")
+    if mode == "item_id" and not caps["item_id"]:
+        raise ValueError("Item ID column (e.g. listing_mp_item_id) not found in Product Listings; Item ID mode unavailable.")
     if mode == "mpn" and not caps["mpn"]:
         raise ValueError("Master Products sheet or its 'mpn'/'master_id' columns not found; MPN mode unavailable.")
     if not scope_all and (not marketplaces or not sellers):
@@ -193,6 +198,8 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
             rows += rows_for(prod[prod[cols["sku"]] == v], {}, empty_sku=v)
         elif mode == "asin":
             rows += rows_for(prod[prod[cols["asin"]] == v], {"asin": v})
+        elif mode == "item_id":
+            rows += rows_for(prod[prod[cols["item_id"]] == v], {"item_id": v})
         elif mode == "master_id":
             rows += rows_for(prod[prod[cols["master"]] == v], {"master_id": v})
         else:  # mpn

@@ -23,7 +23,7 @@ def template_store():
 store = template_store()
 ss = st.session_state
 
-MODE_LABELS = {"sku": "By SKU", "asin": "By ASIN", "master_id": "By Master ID", "mpn": "By MPN"}
+MODE_LABELS = {"sku": "By SKU", "asin": "By ASIN", "item_id": "By Item ID", "master_id": "By Master ID", "mpn": "By MPN"}
 
 
 # ---------- Step 0: template ----------
