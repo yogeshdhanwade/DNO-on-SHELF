@@ -188,6 +188,76 @@ def detect_brand(master_df, master_cols):
     return vals.value_counts().index[0] if len(vals) else None
 
 
+_CANON = ["sku", "listing_id", "marketplace", "seller", "master", "asin", "page_type", "secondary_id"]
+
+
+def load_portfolios(files):
+    """files: list of (file_name, bytes). Parses each portfolio and merges them into one
+    state, tagging every Product Listings row with its brand. One file works the same way."""
+    if not files:
+        raise ValueError("No portfolio file uploaded.")
+
+    parts = []
+    for fname, data in files:
+        try:
+            st_ = load_portfolio(data)
+        except ValueError as e:
+            raise ValueError(f"{fname}: {e}")
+        parts.append((st_["brand"] or fname.rsplit(".", 1)[0], st_))
+
+    present = {k: False for k in _CANON}
+    master_present = {"mpn": False, "master_id": False}
+    orig_columns, prod_frames, master_frames = [], [], []
+
+    for brand, st_ in parts:
+        df = st_["prod_df"]
+        orig_columns += [c for c in df.columns if c not in orig_columns]
+        ren = {}
+        for k in _CANON:
+            if st_["cols"].get(k):
+                ren[st_["cols"][k]] = "_c_" + k
+                present[k] = True
+        df = df.rename(columns=ren)
+        for k in _CANON:
+            if "_c_" + k not in df.columns:
+                df["_c_" + k] = ""
+        df["_c_brand"] = brand
+        prod_frames.append(df)
+
+        mdf, mc = st_["master_df"], st_["master_cols"]
+        if mdf is not None:
+            mren = {mc[k]: "_c_" + k for k in ("mpn", "master_id") if mc.get(k)}
+            for k in mren.values():
+                master_present[k[3:]] = True
+            mdf = mdf.rename(columns=mren)
+            for k in ("mpn", "master_id"):
+                if "_c_" + k not in mdf.columns:
+                    mdf["_c_" + k] = ""
+            master_frames.append(mdf[["_c_mpn", "_c_master_id"]])
+
+    prod_df = pd.concat(prod_frames, ignore_index=True)
+    cols = {k: ("_c_" + k if present[k] else None) for k in _CANON}
+    cols["brand"] = "_c_brand"
+    master_df = pd.concat(master_frames, ignore_index=True) if master_frames else None
+    master_cols = {k: ("_c_" + k if master_present[k] else None) for k in ("mpn", "master_id")}
+
+    mp_col, seller_col = cols["marketplace"], cols["seller"]
+    brands = list(dict.fromkeys(b for b, _ in parts))
+    return {
+        "prod_df": prod_df, "cols": cols,
+        "master_df": master_df, "master_cols": master_cols,
+        "marketplaces": sorted({safe_str(x) for x in prod_df[mp_col] if safe_str(x)}),
+        "sellers": sorted({safe_str(x) for x in prod_df[seller_col] if safe_str(x)}),
+        "sellers_by_mp": {
+            mp: sorted({safe_str(s) for s in grp[seller_col] if safe_str(s)})
+            for mp, grp in prod_df[prod_df[mp_col] != ""].groupby(mp_col)
+        },
+        "brands": brands,
+        "brand": brands[0] if len(brands) == 1 else "Multi-Brand",
+        "orig_columns": orig_columns,
+    }
+
+
 def capabilities(state):
     mc = state["master_cols"]
     return {
@@ -225,13 +295,15 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
         """key: dict of leading columns identifying the input value."""
         base = in_scope(base)
         if base.empty:
-            return [{**key, "master_id": key.get("master_id", ""), "listing_id": "", "sku": empty_sku, "marketplace": "", "seller_account": "", "count": 0}]
+            return [{**key, "master_id": key.get("master_id", ""), "brand": "", "listing_id": "",
+                     "sku": empty_sku, "marketplace": "", "seller_account": "", "count": 0}]
         out = []
         for (mp, seller), sub in base.groupby([cols["marketplace"], cols["seller"]], sort=True):
             lids = sub[cols["listing_id"]].replace("", pd.NA).dropna().astype(str).unique().tolist()
             for lid in lids:
                 rep = sub[sub[cols["listing_id"]] == lid].iloc[0]
                 out.append({**key, "master_id": safe_str(rep[cols["master"]]),
+                            "brand": safe_str(rep[cols["brand"]]) if cols.get("brand") else "",
                             "listing_id": safe_str(lid), "sku": safe_str(rep[cols["sku"]]),
                             "marketplace": safe_str(mp), "seller_account": safe_str(seller),
                             "count": len(lids)})

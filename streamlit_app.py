@@ -15,7 +15,7 @@ import core
 
 st.set_page_config(page_title="Product Catalog Auto-DNO on Shelf", layout="wide")
 st.title("Product Catalog Auto-DNO on Shelf")
-st.caption("Bulk DNO & un-DNO for Shelf LIDs")
+st.caption("Bulk DNO & un-DNO for every LID on Shelf, from portfolio to upload file in minutes")
 
 
 @st.cache_resource
@@ -47,14 +47,14 @@ if "bytes" not in store:
 
 # ---------- Upload ----------
 st.header("Upload Brand's Portfolio")
-pf = st.file_uploader("Brand portfolio (.xlsx with Product Listings & optional Master Products)",
-                      type=["xlsx", "xlsm"], key="pf")
-if pf is not None:
-    key = (pf.name, pf.size)
+pfs = st.file_uploader("Brand portfolio - add one or more (.xlsx with Product Listings & optional Master Products)",
+                       type=["xlsx", "xlsm"], accept_multiple_files=True, key="pf")
+if pfs:
+    key = tuple((f.name, f.size) for f in pfs)
     if ss.get("pf_key") != key:
         try:
             with st.spinner("Reading portfolio..."):
-                ss["portfolio"] = core.load_portfolio(pf.getvalue())
+                ss["portfolio"] = core.load_portfolios([(f.name, f.getvalue()) for f in pfs])
             ss["pf_key"] = key
             ss.pop("checkup", None)
             ss.pop("dno_file", None)
@@ -63,15 +63,19 @@ if pf is not None:
             ss.pop("pf_key", None)
             st.error(str(e))
 
+if not pfs:  # all files removed from the uploader -> start clean
+    for k in ("portfolio", "pf_key", "checkup", "brand"):
+        ss.pop(k, None)
+
 state = ss.get("portfolio")
 if not state:
     st.info("Upload a portfolio file to continue.")
     st.stop()
 
 caps = core.capabilities(state)
-brand = state.get("brand") or os.path.splitext(ss.get("pf_key", ("Brand",))[0])[0]
-st.caption(f"{len(state['prod_df'])} listing rows - {len(state['marketplaces'])} marketplace(s) - "
-           f"{len(state['sellers'])} seller(s)")
+brand = state["brand"]
+st.caption(f"{len(state['brands'])} brand(s) - {len(state['prod_df'])} listing rows - "
+           f"{len(state['marketplaces'])} marketplace(s) - {len(state['sellers'])} seller(s)")
 
 # ---------- Find listings ----------
 st.header("Fetch Listing IDs by Identifier")
@@ -84,8 +88,8 @@ if mode is None:  # user clicked the selected option again
 hidden = [MODE_LABELS[m] for m in core.MODES if m not in modes]
 if hidden:
     st.caption("Not available for this portfolio (column not found): " + ", ".join(hidden))
-    st.caption("Columns found in Product Listings: " + ", ".join(map(str, state["prod_df"].columns)))
-st.caption(f"Brand: **{brand}**" + ("" if state.get("brand") else " (taken from the portfolio file name; no brand column found)"))
+    st.caption("Columns found in Product Listings: " + ", ".join(map(str, state["orig_columns"])))
+st.caption("Brands: **" + ", ".join(state["brands"]) + "**")
 ALL_LIDS, MP_LIDS = "All LIDs", "LIDs Marketplace-wise"
 scope = st.segmented_control("Listing Coverage", [ALL_LIDS, MP_LIDS],
                              default=ALL_LIDS, key="scope") or ALL_LIDS
@@ -137,7 +141,9 @@ safe_brand = "".join(c for c in ss["brand"] if c.isalnum() or c in ("_", "-", " 
 
 # Results table: rows are grouped by Master ID, and Master IDs that cover 2+ SKUs share one colour.
 df = pd.DataFrame(rows)
-front = [c for c in ("mpn", "page_id", "secondary_id", "master_id", "sku") if c in df.columns]
+if len(state["brands"]) < 2 and "brand" in df.columns:
+    df = df.drop(columns="brand")  # only worth showing when several brands were uploaded
+front = [c for c in ("brand", "mpn", "page_id", "secondary_id", "master_id", "sku") if c in df.columns]
 df = df[front + [c for c in df.columns if c not in front]]
 if "master_id" in df.columns:
     # group by Master ID; rows with no Master ID (no match) go last
