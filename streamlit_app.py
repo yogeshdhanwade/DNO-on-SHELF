@@ -13,7 +13,7 @@ import core
 
 st.set_page_config(page_title="Shelf Auto-DNO", layout="wide")
 st.title("Shelf Auto-DNO")
-st.caption("Upload a brand portfolio, pick how to look up listings, then download the DNO upload file.")
+st.caption("Bulk DNO & un-DNO for Shelf LIDs")
 
 
 @st.cache_resource
@@ -72,7 +72,7 @@ st.caption(f"{len(state['prod_df'])} listing rows - {len(state['marketplaces'])}
            f"{len(state['sellers'])} seller(s)")
 
 # ---------- Find listings ----------
-st.header("Find Listing IDs")
+st.header("Fetch Listing IDs by Identifier")
 modes = [m for m in core.MODES if caps.get(m, True)]
 mode = st.segmented_control("Look up listings by", modes, default=modes[0],
                             format_func=MODE_LABELS.get, key="mode")
@@ -85,7 +85,7 @@ if hidden:
     st.caption("Columns found in Product Listings: " + ", ".join(map(str, state["prod_df"].columns)))
 st.caption(f"Brand: **{brand}**" + ("" if state.get("brand") else " (taken from the portfolio file name; no brand column found)"))
 ALL_LIDS, MP_LIDS = "All LIDs", "LIDs Marketplace-wise"
-scope = st.segmented_control("Which LIDs?", [ALL_LIDS, MP_LIDS],
+scope = st.segmented_control("Listing Coverage", [ALL_LIDS, MP_LIDS],
                              default=ALL_LIDS, key="scope") or ALL_LIDS
 mps, sellers = [], []
 if scope == MP_LIDS:
@@ -99,7 +99,7 @@ if scope == MP_LIDS:
 hint = " - leave blank to use all from Master Products" if mode == "mpn" else ""
 values = st.text_area(f"Paste {MODE_NOUNS[mode]} (comma or one per line){hint}", height=120)
 
-if st.button("Find Listing IDs", type="primary"):
+if st.button("Fetch LIDs", type="primary"):
     ss.pop("dno_file", None)
     try:
         rows = core.build_checkup(state, mode, core.parse_values(values),
@@ -134,25 +134,32 @@ if "bytes" not in store:
     st.warning("DNO template is missing from the repository.")
     st.stop()
 
-dno_type = st.radio("DNO Type", ["Temporary", "Permanent"], horizontal=True)
+dno_type = st.radio("DNO Type", ["Temporary", "Permanent", "UN - DNO"], horizontal=True)
+undno = dno_type == "UN - DNO"
 temp = dno_type == "Temporary"
-reason = st.selectbox("Reason Code", core.TEMPORARY_REASONS if temp else core.PERMANENT_REASONS)
-c1, c2 = st.columns(2)
-start_d = c1.date_input("Start Date", value=None, format="YYYY-MM-DD")
-end_d = c2.date_input("End Date", value=None, format="YYYY-MM-DD") if temp else None
-start = start_d.isoformat() if start_d else ""
-end = end_d.isoformat() if end_d else ""
+reason, start, end, note = "", "", "", ""
+if undno:
+    st.info("UN - DNO marks every DNO attribute (note, reason code, temporary flag, start and end date) as <<Delete>>.")
+else:
+    reason = st.selectbox("Reason Code", core.TEMPORARY_REASONS if temp else core.PERMANENT_REASONS)
+    c1, c2 = st.columns(2)
+    start_d = c1.date_input("Start Date", value=None, format="YYYY-MM-DD")
+    end_d = c2.date_input("End Date", value=None, format="YYYY-MM-DD") if temp else None
+    start = start_d.isoformat() if start_d else ""
+    end = end_d.isoformat() if end_d else ""
 c3, c4 = st.columns(2)
-ship = c3.selectbox("Shippable", ["", "Y", "N"])
-sync = c4.selectbox("Sync Avail Inv", ["", "Y", "N"])
-note = st.text_input("DNO Note (optional)")
+ship = c3.selectbox("Able to ship to marketplace (Shippable)", ["", "Y", "N"])
+sync = c4.selectbox("Sync inventory to marketplace (Sync Avail Inv)", ["", "Y", "N"])
+if not undno:
+    note = st.text_input("DNO Note (optional)")
 
-if st.button("Generate DNO File", type="primary"):
-    cfg = {"temporary": temp, "reason": reason, "start": start, "end": end,
+if st.button("Generate UN-DNO File" if undno else "Generate DNO File", type="primary"):
+    cfg = {"undno": undno, "temporary": temp, "reason": reason, "start": start, "end": end,
            "shippable": ship, "sync_inv": sync, "note": note}
     try:
         data = core.generate_dno(io.BytesIO(store["bytes"]), listing_ids, cfg)
-        ss["dno_file"] = (data, f"{safe_brand}_{sku_count}_{dno_type} DNO.xlsx")
+        out_name = f"{safe_brand}_{sku_count}_UN-DNO.xlsx" if undno else f"{safe_brand}_{sku_count}_{dno_type} DNO.xlsx"
+        ss["dno_file"] = (data, out_name)
     except ValueError as e:
         ss.pop("dno_file", None)
         st.error(str(e))

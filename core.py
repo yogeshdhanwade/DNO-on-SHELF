@@ -22,6 +22,12 @@ PERMANENT_REASONS = [
     "Production Discontinued", "Amaczar Legacy DNO", "Listing Deprecated",
 ]
 
+UNDNO_DELETE = "<<Delete>>"
+DNO_ATTRIBUTES = [
+    "listing_dno_note", "listing_dno_reason_code", "listing_dno_is_temporary",
+    "listing_dno_start_date", "listing_dno_end_date",
+]
+
 TEMPLATE_HEADERS = [
     "listing_action", "listing_id", "listing_dno_note", "listing_dno_reason_code",
     "listing_dno_is_temporary", "listing_dno_start_date", "listing_dno_end_date",
@@ -270,14 +276,16 @@ def checkup_to_xlsx(rows):
 def generate_dno(template_path, listing_ids, cfg):
     """Fill the formatted template. cfg keys: temporary(bool), reason, start, end,
     shippable, sync_inv, note. Returns xlsx bytes."""
+    undno = cfg.get("undno", False)
     start, end = cfg.get("start", "").strip(), cfg.get("end", "").strip()
-    if not validate_date_str(start):
-        raise ValueError("Invalid start date. Use YYYY-MM-DD.")
-    if cfg["temporary"] and not validate_date_str(end):
-        raise ValueError("Invalid end date for Temporary DNO. Use YYYY-MM-DD.")
-    allowed = TEMPORARY_REASONS if cfg["temporary"] else PERMANENT_REASONS
-    if cfg.get("reason") not in allowed:
-        raise ValueError("Reason code is not valid for the selected DNO type.")
+    if not undno:
+        if not validate_date_str(start):
+            raise ValueError("Invalid start date. Use YYYY-MM-DD.")
+        if cfg["temporary"] and not validate_date_str(end):
+            raise ValueError("Invalid end date for Temporary DNO. Use YYYY-MM-DD.")
+        allowed = TEMPORARY_REASONS if cfg["temporary"] else PERMANENT_REASONS
+        if cfg.get("reason") not in allowed:
+            raise ValueError("Reason code is not valid for the selected DNO type.")
     if not listing_ids:
         raise ValueError("No listing IDs found in Checkup.")
 
@@ -302,17 +310,22 @@ def generate_dno(template_path, listing_ids, cfg):
 
     for i, lid in enumerate(listing_ids):
         r = first_data_row + i
-        values = {
+        if undno:  # un-DNO = every DNO attribute set to <<Delete>>
+            values = {h: UNDNO_DELETE for h in DNO_ATTRIBUTES}
+        else:
+            values = {
+                "listing_dno_note": cfg.get("note", "").strip(),
+                "listing_dno_reason_code": cfg["reason"],
+                "listing_dno_is_temporary": "Y" if cfg["temporary"] else "N",
+                "listing_dno_start_date": start,
+                "listing_dno_end_date": end if cfg["temporary"] else "",
+            }
+        values.update({
             "listing_action": "Update Existing",
             "listing_id": lid,
-            "listing_dno_note": cfg.get("note", "").strip(),
-            "listing_dno_reason_code": cfg["reason"],
-            "listing_dno_is_temporary": "Y" if cfg["temporary"] else "N",
-            "listing_dno_start_date": start,
-            "listing_dno_end_date": end if cfg["temporary"] else "",
             "listing_is_shipable": cfg.get("shippable", "") or "",
             "listing_sync_avail_inv": cfg.get("sync_inv", "") or "",
-        }
+        })
         for h, v in values.items():
             ws.cell(row=r, column=header_map[h]).value = v
 
