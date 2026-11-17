@@ -75,30 +75,32 @@ hidden = [MODE_LABELS[m] for m in core.MODES if m not in modes]
 if hidden:
     st.caption("Not available for this portfolio (column not found): " + ", ".join(hidden))
     st.caption("Columns found in Product Listings: " + ", ".join(map(str, state["prod_df"].columns)))
-brand = st.text_input("Brand (used in file names)")
+brand = state.get("brand") or os.path.splitext(ss.get("pf_key", ("Brand",))[0])[0]
+st.caption(f"Brand: **{brand}**" + ("" if state.get("brand") else " (taken from the portfolio file name; no brand column found)"))
 scope = st.radio("Scope", ["All Listing IDs", "Specific Listing IDs"], horizontal=True)
 mps, sellers = [], []
 if scope == "Specific Listing IDs":
     c1, c2 = st.columns(2)
-    mps = c1.multiselect("Marketplace(s)", state["marketplaces"])
-    sellers = c2.multiselect("Seller(s)", state["sellers"])
+    mps = c1.multiselect("Marketplace(s)", state["marketplaces"], key="sel_mps")
+    # only sellers that sell in the chosen marketplaces
+    seller_opts = sorted({s for mp in mps for s in state["sellers_by_mp"].get(mp, [])})
+    ss["sel_sellers"] = [s for s in ss.get("sel_sellers", []) if s in seller_opts]
+    sellers = c2.multiselect("Seller(s)", seller_opts, key="sel_sellers",
+                             placeholder="Select a marketplace first" if not mps else "Choose seller(s)")
 hint = " - leave blank to use all from Master Products" if mode == "mpn" else ""
 noun = {"secondary_id": "Secondary IDs (UPC / GTIN)"}.get(mode, MODE_LABELS[mode][3:] + "s")
 values = st.text_area(f"{noun} (comma / newline separated){hint}", height=120)
 
 if st.button("Create Checkup", type="primary"):
     ss.pop("dno_file", None)
-    if not brand.strip():
-        st.error("Brand is required (for final DNO file name).")
-    else:
-        try:
-            rows = core.build_checkup(state, mode, core.parse_values(values),
-                                      scope == "All Listing IDs", mps, sellers)
-            ss["checkup"] = rows
-            ss["brand"] = brand.strip()
-        except ValueError as e:
-            ss.pop("checkup", None)
-            st.error(str(e))
+    try:
+        rows = core.build_checkup(state, mode, core.parse_values(values),
+                                  scope == "All Listing IDs", mps, sellers)
+        ss["checkup"] = rows
+        ss["brand"] = brand
+    except ValueError as e:
+        ss.pop("checkup", None)
+        st.error(str(e))
 
 rows = ss.get("checkup")
 if not rows:
@@ -106,6 +108,7 @@ if not rows:
 
 found = [r for r in rows if r["listing_id"]]
 listing_ids = list(dict.fromkeys(r["listing_id"] for r in found))
+sku_count = len({r["sku"] for r in found if r["sku"]})
 st.write(f"**{len(listing_ids)}** unique listing ID(s); {len(rows) - len(found)} input(s) with no match.")
 st.dataframe(pd.DataFrame(rows), use_container_width=True, height=300)
 safe_brand = "".join(c for c in ss["brand"] if c.isalnum() or c in ("_", "-", " ")).strip() or "Brand"
@@ -141,7 +144,7 @@ if st.button("Confirm & Generate DNO Upload", type="primary"):
            "shippable": ship, "sync_inv": sync, "note": note}
     try:
         data = core.generate_dno(io.BytesIO(store["bytes"]), listing_ids, cfg)
-        ss["dno_file"] = (data, f"{safe_brand} DNO {dno_type} {datetime.now():%d-%m-%Y}.xlsx")
+        ss["dno_file"] = (data, f"{safe_brand}_{sku_count}_{dno_type} DNO.xlsx")
     except ValueError as e:
         ss.pop("dno_file", None)
         st.error(str(e))

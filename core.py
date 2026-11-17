@@ -150,11 +150,36 @@ def load_portfolio(file_like):
     if not marketplaces or not sellers:
         raise ValueError("No marketplaces or sellers detected in Product Listings sheet.")
 
+    # sellers that actually sell in each marketplace (drives the dependent dropdown)
+    mp_col, seller_col = cols["marketplace"], cols["seller"]
+    sellers_by_mp = {
+        mp: sorted({safe_str(s) for s in grp[seller_col] if safe_str(s)})
+        for mp, grp in prod_df[prod_df[mp_col] != ""].groupby(mp_col)
+    }
+
     return {
         "prod_df": prod_df, "cols": cols,
         "master_df": master_df, "master_cols": master_cols,
         "marketplaces": marketplaces, "sellers": sellers,
+        "sellers_by_mp": sellers_by_mp,
+        "brand": detect_brand(master_df, master_cols),
     }
+
+
+BRAND_CANDIDATES = ["master_brand_name", "master_brand", "brand_name", "brand"]
+
+
+def detect_brand(master_df, master_cols):
+    """Most common brand in the Master Products sheet, or None if there is no brand column."""
+    if master_df is None:
+        return None
+    norm = normalize_cols(master_df)
+    col = next((norm[c] for c in BRAND_CANDIDATES if c in norm), None)
+    if not col:
+        return None
+    vals = master_df[col].map(safe_str)
+    vals = vals[vals != ""]
+    return vals.value_counts().index[0] if len(vals) else None
 
 
 def capabilities(state):
