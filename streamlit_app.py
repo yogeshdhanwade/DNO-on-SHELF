@@ -1,4 +1,4 @@
-"""Shelf DNO Automation Tool - Streamlit app (uses core.py).
+"""Shelf Auto-DNO - Streamlit app (uses core.py).
 
 Run:  streamlit run streamlit_app.py
 """
@@ -11,8 +11,8 @@ import streamlit as st
 
 import core
 
-st.set_page_config(page_title="Shelf DNO Automation Tool", layout="wide")
-st.title("Shelf DNO Automation Tool")
+st.set_page_config(page_title="Shelf Auto-DNO", layout="wide")
+st.title("Shelf Auto-DNO")
 st.caption("Upload a brand portfolio, pick how to look up listings, then download the DNO upload file.")
 
 
@@ -44,7 +44,7 @@ if "bytes" not in store:
     st.error("DNO template not found. Add an .xlsx with 'template' in its name next to streamlit_app.py on GitHub.")
 
 # ---------- Upload ----------
-st.header("Upload Brand Portfolio")
+st.header("Upload Brand's Portfolio")
 pf = st.file_uploader("Brand portfolio (.xlsx with Product Listings & optional Master Products)",
                       type=["xlsx", "xlsm"], key="pf")
 if pf is not None:
@@ -84,10 +84,11 @@ if hidden:
     st.caption("Not available for this portfolio (column not found): " + ", ".join(hidden))
     st.caption("Columns found in Product Listings: " + ", ".join(map(str, state["prod_df"].columns)))
 st.caption(f"Brand: **{brand}**" + ("" if state.get("brand") else " (taken from the portfolio file name; no brand column found)"))
-scope = st.segmented_control("Scope", ["All Listing IDs", "Specific Listing IDs"],
-                             default="All Listing IDs", key="scope") or "All Listing IDs"
+ALL_LIDS, MP_LIDS = "All LIDs", "LIDs Marketplace-wise"
+scope = st.segmented_control("Which LIDs?", [ALL_LIDS, MP_LIDS],
+                             default=ALL_LIDS, key="scope") or ALL_LIDS
 mps, sellers = [], []
-if scope == "Specific Listing IDs":
+if scope == MP_LIDS:
     c1, c2 = st.columns(2)
     mps = c1.multiselect("Marketplace(s)", state["marketplaces"], key="sel_mps")
     # only sellers that sell in the chosen marketplaces
@@ -102,7 +103,7 @@ if st.button("Find Listing IDs", type="primary"):
     ss.pop("dno_file", None)
     try:
         rows = core.build_checkup(state, mode, core.parse_values(values),
-                                  scope == "All Listing IDs", mps, sellers)
+                                  scope == ALL_LIDS, mps, sellers)
         ss["checkup"] = rows
         ss["brand"] = brand
     except ValueError as e:

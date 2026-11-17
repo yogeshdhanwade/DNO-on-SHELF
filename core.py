@@ -204,13 +204,16 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
         raise ValueError("Secondary ID column not found in Product Listings; Secondary ID mode unavailable.")
     if mode == "mpn" and not caps["mpn"]:
         raise ValueError("Master Products sheet or its 'mpn'/'master_id' columns not found; MPN mode unavailable.")
-    if not scope_all and (not marketplaces or not sellers):
-        raise ValueError("Select at least one marketplace and one seller for Specific Listing IDs.")
+    if not scope_all and not marketplaces:
+        raise ValueError("Select at least one marketplace for 'LIDs Marketplace-wise'.")
 
     def in_scope(df):
         if scope_all:
             return df
-        return df[df[cols["marketplace"]].isin(marketplaces) & df[cols["seller"]].isin(sellers)]
+        df = df[df[cols["marketplace"]].isin(marketplaces)]
+        if sellers:  # no seller chosen = every seller in the selected marketplaces
+            df = df[df[cols["seller"]].isin(sellers)]
+        return df
 
     def rows_for(base, key, empty_sku=""):
         """key: dict of leading columns identifying the input value."""
