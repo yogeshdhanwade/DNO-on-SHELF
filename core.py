@@ -463,24 +463,34 @@ def _mark_manufacturer_discontinued(wb, mids, date):
     if "Master Products" not in wb.sheetnames:
         raise ValueError("Template must contain a 'Master Products' sheet to mark Manufacturer Discontinued.")
     ws = wb["Master Products"]
-    header_row, first_data_row = 3, 4
+    # Find the columns by header text (system names like master_id / is_discontinued, or the
+    # friendly labels), looking at the top rows so a template with fewer columns still works.
     found = {}
-    for col in range(1, ws.max_column + 1):
-        # row 3 holds the system names (master_id, is_discontinued, ...), row 2 the friendly labels
-        k = _hkey(ws.cell(row=header_row, column=col).value or "")
-        label = _hkey(ws.cell(row=header_row - 1, column=col).value or "")
-        if k == "masterid":
-            found.setdefault("master_id", col)
-        elif k in ("action", "masteraction"):
-            found.setdefault("action", col)
-        elif k == "isdiscontinued" or ("manufacturerdiscontinued" in label and "date" not in label):
-            found.setdefault("flag", col)
-        elif k == "discontinueddate" or "manufacturerdiscontinueddate" in label:
-            found.setdefault("date", col)
+    for r in range(1, 7):
+        for col in range(1, ws.max_column + 1):
+            val = ws.cell(row=r, column=col).value
+            if val is None:
+                continue
+            k = _hkey(val)
+            if k in ("action", "masteraction"):
+                kind = "action"
+            elif k.startswith("masterid"):
+                kind = "master_id"
+            elif k == "discontinueddate" or ("discontinued" in k and "date" in k):
+                kind = "date"
+            elif k == "isdiscontinued" or "manufacturerdiscontinued" in k:
+                kind = "flag"
+            else:
+                continue
+            found.setdefault(kind, col)
     missing = [n for n, key in (("Master ID", "master_id"), ("Manufacturer Discontinued?", "flag"),
                                 ("Manufacturer Discontinued Date", "date")) if key not in found]
     if missing:
-        raise ValueError(f"Template 'Master Products' sheet (headers on row 3) is missing: {missing}")
+        raise ValueError(f"Template 'Master Products' sheet is missing columns: {missing}")
+    # data starts below the last header row (the last non-empty cell in the top rows of those columns)
+    last_header = max((r for r in range(1, 7) for col in found.values()
+                       if ws.cell(row=r, column=col).value not in (None, "")), default=3)
+    first_data_row = last_header + 1
 
     for r in range(first_data_row, ws.max_row + 1):  # clear leftovers in the columns we fill
         for col in found.values():

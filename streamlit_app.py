@@ -270,7 +270,7 @@ if not undno:
     note = st.text_input("DNO Note (optional)")
     mids = list(dict.fromkeys(m for m in picked["master_id"] if m))
     if st.checkbox(f"Mark Manufacturer Discontinued on Master Products ({len(mids)} Master ID(s))",
-                   help="Adds each selected Master ID to the Master Products sheet with Manufacturer "
+                   key="mark_discontinued", help="Adds each selected Master ID to the Master Products sheet with Manufacturer "
                         "Discontinued? = Y and the Manufacturer Discontinued Date = the DNO start date."):
         disc_mids = mids
         if not mids:
@@ -282,7 +282,9 @@ if st.button("Generate UN-DNO File" if undno else "Generate DNO File", type="pri
     try:
         data = core.generate_dno(io.BytesIO(store["bytes"]), listing_ids, cfg)
         out_name = f"{safe_brand}_{sku_count}_UN-DNO.xlsx" if undno else f"{safe_brand}_{sku_count}_{dno_type} DNO.xlsx"
-        st.success(f"{out_name} generated - {len(listing_ids)} listing ID(s). Downloading...")
+        st.success(f"{out_name} generated - {len(listing_ids)} listing ID(s)"
+                   + (f"; Master Products: {len(disc_mids)} Master ID(s) marked Manufacturer Discontinued" if disc_mids else "")
+                   + ". Downloading...")
         # trigger the browser download straight away (no extra download button)
         b64 = base64.b64encode(data).decode()
         components.html(
