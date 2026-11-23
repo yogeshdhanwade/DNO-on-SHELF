@@ -90,6 +90,26 @@ if hidden:
     st.caption("Not available for this portfolio (column not found): " + ", ".join(hidden))
     st.caption("Columns found in Product Listings: " + ", ".join(map(str, state["orig_columns"])))
 st.caption("Brands: **" + ", ".join(state["brands"]) + "**")
+hint = " - leave blank to use all from Master Products" if mode == "mpn" else ""
+values = st.text_area(f"Paste {MODE_NOUNS[mode]} (comma or one per line){hint}", height=120)
+
+# Marketplaces / sellers that actually have LIDs for the pasted identifiers (nothing pasted yet = all).
+parsed = core.parse_values(values)
+avail_key = (mode, tuple(parsed), ss.get("pf_key"))
+if ss.get("avail_key") != avail_key:
+    avail = {mp: list(s) for mp, s in state["sellers_by_mp"].items()}
+    if parsed or mode == "mpn":
+        try:
+            prev, _ = core.build_checkup(state, mode, parsed, True, [], [])
+            avail = {}
+            for r in prev:
+                avail.setdefault(r["marketplace"], set()).add(r["seller_account"])
+            avail = {mp: sorted(s) for mp, s in avail.items()}
+        except ValueError:
+            pass
+    ss["avail_key"], ss["avail"] = avail_key, avail
+avail = ss["avail"]
+
 ALL_LIDS, MP_LIDS = "All LIDs", "LIDs Marketplace-wise"
 scope = st.segmented_control("Listing Coverage", [ALL_LIDS, MP_LIDS],
                              default=ALL_LIDS, key="scope") or ALL_LIDS
@@ -109,21 +129,21 @@ if scope == MP_LIDS:
         css.append(f'.st-key-sel_mps [data-baseweb="tag"]:has(span[title="{safe}"])'
                    f'{{background:{c}33 !important;color:{c} !important;border:1px solid {c}88;}}')
     st.markdown("<style>" + "".join(css) + "</style>", unsafe_allow_html=True)
-    mps = c1.multiselect("Marketplace(s)", state["marketplaces"], key="sel_mps")
-    # only sellers that sell in the chosen marketplaces
-    seller_opts = sorted({s for mp in mps for s in state["sellers_by_mp"].get(mp, [])})
+    mp_opts = sorted(avail)
+    ss["sel_mps"] = [m for m in ss.get("sel_mps", []) if m in mp_opts]  # drop picks that no longer apply
+    mps = c1.multiselect("Marketplace(s)", mp_opts, key="sel_mps",
+                         placeholder="No marketplace has LIDs for these identifiers" if not mp_opts else "Choose marketplace(s)")
+    # only sellers that sell in the chosen marketplaces (for the pasted identifiers)
+    seller_opts = sorted({s for mp in mps for s in avail.get(mp, [])})
     ss["sel_sellers"] = [s for s in ss.get("sel_sellers", []) if s in seller_opts]
     sellers = c2.multiselect("Seller(s)", seller_opts, key="sel_sellers",
                              placeholder="Select a marketplace first" if not mps else "Choose seller(s)")
-hint = " - leave blank to use all from Master Products" if mode == "mpn" else ""
-values = st.text_area(f"Paste {MODE_NOUNS[mode]} (comma or one per line){hint}", height=120)
 
 if st.button("Fetch LIDs", type="primary"):
     ss.pop("dno_file", None)
     try:
-        rows = core.build_checkup(state, mode, core.parse_values(values),
-                                  scope == ALL_LIDS, mps, sellers)
-        ss["checkup"] = rows
+        ss["checkup"], ss["missing"] = core.build_checkup(state, mode, parsed, scope == ALL_LIDS, mps, sellers)
+        ss["ck_mode"] = mode
         ss["ck_id"] = ss.get("ck_id", 0) + 1  # new table -> new editor, all rows ticked again
         ss["brand"] = brand
     except ValueError as e:
@@ -131,48 +151,79 @@ if st.button("Fetch LIDs", type="primary"):
         st.error(str(e))
 
 rows = ss.get("checkup")
+if rows is None:
+    st.stop()
+missing = ss.get("missing", [])
+
+
+def show_missing():
+    """Footnote listing the inputs that matched no LIDs, grouped by reason."""
+    by_reason = {}
+    for value, why in missing:
+        by_reason.setdefault(why, []).append(value)
+    for why, vals in by_reason.items():
+        more = f" ... and {len(vals) - 25} more" if len(vals) > 25 else ""
+        st.caption(f"No LIDs ({why}): " + ", ".join(vals[:25]) + more)
+
+
 if not rows:
+    st.warning("No listing IDs found.")
+    show_missing()
     st.stop()
 
-found = [r for r in rows if r["listing_id"]]
-all_lids = list(dict.fromkeys(r["listing_id"] for r in found))
-st.write(f"**{len(all_lids)}** unique listing ID(s); {len(rows) - len(found)} input(s) with no match.")
+all_lids = list(dict.fromkeys(r["listing_id"] for r in rows))
 safe_brand = "".join(c for c in ss["brand"] if c.isalnum() or c in ("_", "-", " ")).strip() or "Brand"
 
 # Results table: rows are grouped by Master ID, and Master IDs that cover 2+ SKUs share one colour.
 df = pd.DataFrame(rows).fillna("")
 if len(state["brands"]) < 2 and "brand" in df.columns:
     df = df.drop(columns="brand")  # only worth showing when several brands were uploaded
-front = [c for c in ("brand", "mpn", "page_id", "secondary_id", "master_id", "sku") if c in df.columns]
-df = df[front + [c for c in df.columns if c not in front]]
-if "master_id" in df.columns:
-    # group by Master ID; rows with no Master ID (no match) go last
-    df = df.sort_values("master_id", kind="stable", key=lambda s: s.where(s != "", "￿")).reset_index(drop=True)
-    multi = df[df["master_id"] != ""].groupby("master_id")["sku"].nunique()
-    multi = [m for m, n in multi.items() if n > 1]
-    tints = ["#2dd4bf", "#38bdf8", "#a78bfa", "#fb7185", "#fbbf24", "#34d399", "#fb923c", "#f472b6"]
-    tint_of = {m: tints[i % len(tints)] for i, m in enumerate(multi)}
+# group by Master ID so SKUs of one Master ID sit together
+df = df.sort_values("master_id", kind="stable", key=lambda s: s.where(s != "", "￿")).reset_index(drop=True)
+multi = [m for m, n in df[df["master_id"] != ""].groupby("master_id")["sku"].nunique().items() if n > 1]
+tints = ["#2dd4bf", "#38bdf8", "#a78bfa", "#fb7185", "#fbbf24", "#34d399", "#fb923c", "#f472b6"]
+tint_of = {m: tints[i % len(tints)] for i, m in enumerate(multi)}
 
-    def tint_row(row):
-        c = tint_of.get(row["master_id"])
-        return [f"background-color: {c}2e" if c else ""] * len(row)
 
-    df.insert(0, "Apply", df["listing_id"] != "")  # every matched LID starts ticked
-    shown = df.style.apply(tint_row, axis=1)
-    if multi:
-        st.caption("Rows sharing a colour are SKUs under the same Master ID.")
-else:
-    df.insert(0, "Apply", df["listing_id"] != "")
-    shown = df
+def tint_row(row):
+    c = tint_of.get(row["master_id"])
+    return [f"background-color: {c}2e" if c else ""] * len(row)
 
-st.caption("Untick any listing you do NOT want to DNO / un-DNO. Everything ticked is included in the file.")
+
+df.insert(0, "Apply", True)  # every matched LID starts ticked
+
+# Default view: the searched identifier first (never repeated), then a short list of columns. Columns
+# that are mostly empty are left out; every attribute stays available from the eye icon in the table toolbar.
+ident = ss.get("ck_mode", mode)
+wanted = [ident, "brand", "master_id", "listing_id", "sku", "marketplace", "seller_account", "able_to_ship", "dno"]
+always = {ident, "brand", "listing_id", "marketplace", "seller_account"}
+visible = []
+for c in wanted:
+    if c not in df.columns or c in visible:
+        continue
+    if c not in always and df[c].isin(["", "-"]).mean() > 0.5:
+        continue
+    visible.append(c)
+
+LABELS = {"mpn": "MPN", "master_id": "Master ID", "sku": "SKU", "page_id": "Item ID / ASIN",
+          "secondary_id": "GTIN (UPC)", "brand": "Brand", "listing_id": "LID", "marketplace": "Marketplace",
+          "seller_account": "Seller account", "able_to_ship": "Able to ship", "dno": "DNO (Y/N)",
+          "dno_temporary": "DNO temporary", "dno_type": "DNO type", "dno_reason_code": "DNO reason code",
+          "sync_inventory": "Sync inventory"}
+config = {c: st.column_config.TextColumn(LABELS.get(c, c)) for c in df.columns if c != "Apply"}
+config["Apply"] = st.column_config.CheckboxColumn("Apply", default=True, width="small")
+
+if multi:
+    st.caption("Rows sharing a colour are SKUs under the same Master ID.")
+st.caption("Untick any listing you do NOT want to DNO / un-DNO. Use the eye icon in the table's toolbar to show more columns.")
 edited = st.data_editor(
-    shown, use_container_width=True, hide_index=True, key=f"checkup_editor_{ss.get('ck_id', 0)}",
-    height=min(600, 38 * (len(df) + 1) + 3),
-    column_config={"Apply": st.column_config.CheckboxColumn("Apply", default=True)},
+    df.style.apply(tint_row, axis=1), use_container_width=True, hide_index=True,
+    key=f"checkup_editor_{ss.get('ck_id', 0)}", height=min(600, 38 * (len(df) + 1) + 3),
+    column_order=["Apply"] + visible, column_config=config,
     disabled=[c for c in df.columns if c != "Apply"],
 )
-picked = edited[edited["Apply"] & (edited["listing_id"] != "")]
+show_missing()
+picked = edited[edited["Apply"]]
 listing_ids = list(dict.fromkeys(picked["listing_id"]))
 sku_count = picked.loc[picked["sku"] != "", "sku"].nunique()
 st.write(f"**{len(listing_ids)}** of {len(all_lids)} listing ID(s) selected.")

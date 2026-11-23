@@ -143,6 +143,8 @@ def load_portfolio(file_like):
     cols["ship"] = prod_norm.get("listing_is_shipable")
     cols["dno_temp"] = prod_norm.get("listing_dno_is_temporary")
     cols["dno_reason"] = prod_norm.get("listing_dno_reason_code")
+    cols["dno_start"] = prod_norm.get("listing_dno_start_date")
+    cols["sync"] = prod_norm.get("listing_sync_avail_inv")
 
     master_df, master_cols = None, {}
     master_sheet = find_sheet_like(
@@ -193,15 +195,16 @@ def detect_brand(master_df, master_cols):
 
 
 _CANON = ["sku", "listing_id", "marketplace", "seller", "master", "asin", "page_type", "secondary_id",
-          "ship", "dno_temp", "dno_reason"]
+          "ship", "dno_temp", "dno_reason", "dno_start", "sync"]
 
 
 def _dno_type(temp, reason):
     """Current DNO status from listing_dno_is_temporary + reason code."""
+    # listing_dno_is_temporary: Y = temporary DNO, N = permanent DNO, blank = no DNO applied
     t = str(temp).strip().upper()
     if t in ("Y", "YES", "TRUE", "1"):
         return "Temporary"
-    if reason.strip():  # has a reason code but is not temporary
+    if t in ("N", "NO", "FALSE", "0"):
         return "Permanent"
     return "-"
 
@@ -284,7 +287,8 @@ def capabilities(state):
 
 # ---------- Step 2: checkup ----------
 def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
-    """Return a list of row dicts. One row per (input value, listing_id)."""
+    """Return (rows, missing). rows: one dict per (input value, listing_id). missing: the
+    inputs that matched no LIDs, as (value, reason) pairs."""
     if mode not in MODES:
         raise ValueError(f"Unknown mode: {mode}")
     cols, prod = state["cols"], state["prod_df"]
@@ -309,26 +313,28 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
     def field(rep, k):
         return safe_str(rep[cols[k]]) if cols.get(k) else ""
 
-    def rows_for(base, key, empty_sku=""):
-        """key: dict of leading columns identifying the input value."""
+    def rows_for(base, key):
+        """key: dict of leading columns identifying the input value. Empty list = no LIDs."""
         base = in_scope(base)
-        if base.empty:
-            return [{**key, "master_id": key.get("master_id", ""), "brand": "", "listing_id": "",
-                     "sku": empty_sku, "marketplace": "", "seller_account": "", "able_to_ship": "",
-                     "dno_type": "", "dno_reason_code": "", "count": 0}]
         out = []
+        if base.empty:
+            return out
         for (mp, seller), sub in base.groupby([cols["marketplace"], cols["seller"]], sort=True):
             lids = sub[cols["listing_id"]].replace("", pd.NA).dropna().astype(str).unique().tolist()
             for lid in lids:
                 rep = sub[sub[cols["listing_id"]] == lid].iloc[0]
+                temp, reason = field(rep, "dno_temp"), field(rep, "dno_reason")
+                dno_type = _dno_type(temp, reason)
                 out.append({**key, "master_id": safe_str(rep[cols["master"]]),
                             "brand": safe_str(rep[cols["brand"]]) if cols.get("brand") else "",
                             "listing_id": safe_str(lid), "sku": safe_str(rep[cols["sku"]]),
                             "marketplace": safe_str(mp), "seller_account": safe_str(seller),
                             "able_to_ship": field(rep, "ship"),
-                            "dno_type": _dno_type(field(rep, "dno_temp"), field(rep, "dno_reason")),
-                            "dno_reason_code": field(rep, "dno_reason"),
-                            "count": len(lids)})
+                            "dno": "N" if dno_type == "-" else "Y",  # a value in the temporary field = DNO applied
+                            "dno_temporary": temp,
+                            "dno_type": dno_type,
+                            "dno_reason_code": reason,
+                            "sync_inventory": field(rep, "sync")})
         return out
 
     if mode == "mpn" and not values:
@@ -337,28 +343,43 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
     if not values:
         raise ValueError("Enter at least one value.")
 
-    rows = []
+    rows, missing = [], []  # missing: (value, reason) for inputs that produced no LIDs
     for v in values:
+        before = len(rows)
+        base_found = True  # did the value exist in the portfolio at all (before the marketplace filter)?
         if mode == "sku":
-            rows += rows_for(prod[prod[cols["sku"]] == v], {}, empty_sku=v)
+            base = prod[prod[cols["sku"]] == v]
+            rows += rows_for(base, {})
+            base_found = not base.empty
         elif mode == "page_id":  # ASIN, Item ID, etc. all live in Marketplace Page ID
-            rows += rows_for(prod[prod[cols["asin"]] == v], {"page_id": v})
+            base = prod[prod[cols["asin"]] == v]
+            rows += rows_for(base, {"page_id": v})
+            base_found = not base.empty
         elif mode == "secondary_id":
             sec = prod[cols["secondary_id"]].map(_strip_zeros)
-            rows += rows_for(prod[sec == _strip_zeros(v)], {"secondary_id": v})
+            base = prod[sec == _strip_zeros(v)]
+            rows += rows_for(base, {"secondary_id": v})
+            base_found = not base.empty
         elif mode == "master_id":
-            rows += rows_for(prod[prod[cols["master"]] == v], {"master_id": v})
+            base = prod[prod[cols["master"]] == v]
+            rows += rows_for(base, {"master_id": v})
+            base_found = not base.empty
         else:  # mpn
             mc, mdf = state["master_cols"], state["master_df"]
             mids = mdf[mdf[mc["mpn"]] == v][mc["master_id"]].replace("", pd.NA).dropna().astype(str).unique().tolist()
             if not mids:
-                rows.append({"mpn": v, "master_id": "", "listing_id": "", "sku": "",
-                             "marketplace": "", "seller_account": "", "count": 0})
+                missing.append((v, "not found in Master Products"))
                 continue
+            base_found = False
             for mid in mids:
-                rows += rows_for(prod[prod[cols["master"]] == mid], {"mpn": v, "master_id": mid})
+                base = prod[prod[cols["master"]] == mid]
+                base_found = base_found or not base.empty
+                rows += rows_for(base, {"mpn": v, "master_id": mid})
+        if len(rows) == before:
+            missing.append((v, "no LIDs for the selected marketplace / seller" if base_found
+                            else "not found in the portfolio"))
 
-    return rows
+    return rows, missing
 
 
 def checkup_to_xlsx(rows):
