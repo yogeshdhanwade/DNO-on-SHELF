@@ -124,6 +124,7 @@ if st.button("Fetch LIDs", type="primary"):
         rows = core.build_checkup(state, mode, core.parse_values(values),
                                   scope == ALL_LIDS, mps, sellers)
         ss["checkup"] = rows
+        ss["ck_id"] = ss.get("ck_id", 0) + 1  # new table -> new editor, all rows ticked again
         ss["brand"] = brand
     except ValueError as e:
         ss.pop("checkup", None)
@@ -134,13 +135,12 @@ if not rows:
     st.stop()
 
 found = [r for r in rows if r["listing_id"]]
-listing_ids = list(dict.fromkeys(r["listing_id"] for r in found))
-sku_count = len({r["sku"] for r in found if r["sku"]})
-st.write(f"**{len(listing_ids)}** unique listing ID(s); {len(rows) - len(found)} input(s) with no match.")
+all_lids = list(dict.fromkeys(r["listing_id"] for r in found))
+st.write(f"**{len(all_lids)}** unique listing ID(s); {len(rows) - len(found)} input(s) with no match.")
 safe_brand = "".join(c for c in ss["brand"] if c.isalnum() or c in ("_", "-", " ")).strip() or "Brand"
 
 # Results table: rows are grouped by Master ID, and Master IDs that cover 2+ SKUs share one colour.
-df = pd.DataFrame(rows)
+df = pd.DataFrame(rows).fillna("")
 if len(state["brands"]) < 2 and "brand" in df.columns:
     df = df.drop(columns="brand")  # only worth showing when several brands were uploaded
 front = [c for c in ("brand", "mpn", "page_id", "secondary_id", "master_id", "sku") if c in df.columns]
@@ -157,13 +157,27 @@ if "master_id" in df.columns:
         c = tint_of.get(row["master_id"])
         return [f"background-color: {c}2e" if c else ""] * len(row)
 
+    df.insert(0, "Apply", df["listing_id"] != "")  # every matched LID starts ticked
     shown = df.style.apply(tint_row, axis=1)
     if multi:
         st.caption("Rows sharing a colour are SKUs under the same Master ID.")
 else:
+    df.insert(0, "Apply", df["listing_id"] != "")
     shown = df
-st.dataframe(shown, use_container_width=True, hide_index=True, height=min(600, 38 * (len(df) + 1) + 3))
+
+st.caption("Untick any listing you do NOT want to DNO / un-DNO. Everything ticked is included in the file.")
+edited = st.data_editor(
+    shown, use_container_width=True, hide_index=True, key=f"checkup_editor_{ss.get('ck_id', 0)}",
+    height=min(600, 38 * (len(df) + 1) + 3),
+    column_config={"Apply": st.column_config.CheckboxColumn("Apply", default=True)},
+    disabled=[c for c in df.columns if c != "Apply"],
+)
+picked = edited[edited["Apply"] & (edited["listing_id"] != "")]
+listing_ids = list(dict.fromkeys(picked["listing_id"]))
+sku_count = picked.loc[picked["sku"] != "", "sku"].nunique()
+st.write(f"**{len(listing_ids)}** of {len(all_lids)} listing ID(s) selected.")
 if not listing_ids:
+    st.warning("No listing IDs selected. Tick at least one to continue.")
     st.stop()
 
 # ---------- DNO ----------

@@ -139,6 +139,10 @@ def load_portfolio(file_like):
     cols["asin"] = find_col(page_norm, ASIN_CANDIDATES)  # the Marketplace Page ID column
     cols["page_type"] = find_col(prod_norm, PAGE_TYPE_CANDIDATES)
     cols["secondary_id"] = find_col(prod_norm, SECONDARY_ID_CANDIDATES)
+    # current DNO / shipping status, shown in the checkup table (optional columns)
+    cols["ship"] = prod_norm.get("listing_is_shipable")
+    cols["dno_temp"] = prod_norm.get("listing_dno_is_temporary")
+    cols["dno_reason"] = prod_norm.get("listing_dno_reason_code")
 
     master_df, master_cols = None, {}
     master_sheet = find_sheet_like(
@@ -188,7 +192,18 @@ def detect_brand(master_df, master_cols):
     return vals.value_counts().index[0] if len(vals) else None
 
 
-_CANON = ["sku", "listing_id", "marketplace", "seller", "master", "asin", "page_type", "secondary_id"]
+_CANON = ["sku", "listing_id", "marketplace", "seller", "master", "asin", "page_type", "secondary_id",
+          "ship", "dno_temp", "dno_reason"]
+
+
+def _dno_type(temp, reason):
+    """Current DNO status from listing_dno_is_temporary + reason code."""
+    t = str(temp).strip().upper()
+    if t in ("Y", "YES", "TRUE", "1"):
+        return "Temporary"
+    if reason.strip():  # has a reason code but is not temporary
+        return "Permanent"
+    return "-"
 
 
 def load_portfolios(files):
@@ -291,12 +306,16 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
             df = df[df[cols["seller"]].isin(sellers)]
         return df
 
+    def field(rep, k):
+        return safe_str(rep[cols[k]]) if cols.get(k) else ""
+
     def rows_for(base, key, empty_sku=""):
         """key: dict of leading columns identifying the input value."""
         base = in_scope(base)
         if base.empty:
             return [{**key, "master_id": key.get("master_id", ""), "brand": "", "listing_id": "",
-                     "sku": empty_sku, "marketplace": "", "seller_account": "", "count": 0}]
+                     "sku": empty_sku, "marketplace": "", "seller_account": "", "able_to_ship": "",
+                     "dno_type": "", "dno_reason_code": "", "count": 0}]
         out = []
         for (mp, seller), sub in base.groupby([cols["marketplace"], cols["seller"]], sort=True):
             lids = sub[cols["listing_id"]].replace("", pd.NA).dropna().astype(str).unique().tolist()
@@ -306,6 +325,9 @@ def build_checkup(state, mode, values, scope_all, marketplaces, sellers):
                             "brand": safe_str(rep[cols["brand"]]) if cols.get("brand") else "",
                             "listing_id": safe_str(lid), "sku": safe_str(rep[cols["sku"]]),
                             "marketplace": safe_str(mp), "seller_account": safe_str(seller),
+                            "able_to_ship": field(rep, "ship"),
+                            "dno_type": _dno_type(field(rep, "dno_temp"), field(rep, "dno_reason")),
+                            "dno_reason_code": field(rep, "dno_reason"),
                             "count": len(lids)})
         return out
 
