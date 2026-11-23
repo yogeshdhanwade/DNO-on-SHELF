@@ -136,8 +136,21 @@ if scope == MP_LIDS:
     # only sellers that sell in the chosen marketplaces (for the pasted identifiers)
     seller_opts = sorted({s for mp in mps for s in avail.get(mp, [])})
     ss["sel_sellers"] = [s for s in ss.get("sel_sellers", []) if s in seller_opts]
+    # a marketplace with a single seller gets that seller picked for you, whatever else is chosen
+    handled = set(ss.get("auto_mps", []))
+    for mp in mps:
+        if mp not in handled and len(avail.get(mp, [])) == 1 and avail[mp][0] not in ss["sel_sellers"]:
+            ss["sel_sellers"] = ss["sel_sellers"] + avail[mp]
+    ss["auto_mps"] = list(mps)
     sellers = c2.multiselect("Seller(s)", seller_opts, key="sel_sellers",
                              placeholder="Select a marketplace first" if not mps else "Choose seller(s)")
+    # a marketplace where no seller is ticked keeps all of its sellers
+    ticked = set(sellers)
+    keep = set(sellers)
+    for mp in mps:
+        if not set(avail.get(mp, [])) & ticked:
+            keep |= set(avail.get(mp, []))
+    sellers = sorted(keep)
 
 if st.button("Fetch LIDs", type="primary"):
     ss.pop("dno_file", None)
