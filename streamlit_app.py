@@ -30,8 +30,9 @@ ss = st.session_state
 # Default template: any .xlsx with "template" in its name, committed next to this file in the repo.
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if "bytes" not in store:
-    candidates = sorted(n for n in os.listdir(APP_DIR)
-                        if n.lower().endswith(".xlsx") and "template" in n.lower())
+    candidates = sorted((n for n in os.listdir(APP_DIR)
+                         if n.lower().endswith(".xlsx") and "template" in n.lower()),
+                        key=lambda n: (n != "DNO_Template.xlsx", n))  # DNO_Template.xlsx wins if present
     if candidates:
         with open(os.path.join(APP_DIR, candidates[0]), "rb") as f:
             store["bytes"], store["name"] = f.read(), candidates[0]
@@ -264,12 +265,20 @@ if not undno:
 c3, c4 = st.columns(2)
 ship = c3.selectbox("Able to ship to marketplace (Shippable)", ["", "Y", "N"])
 sync = c4.selectbox("Sync inventory to marketplace (Sync Avail Inv)", ["", "Y", "N"])
+disc_mids = []
 if not undno:
     note = st.text_input("DNO Note (optional)")
+    mids = list(dict.fromkeys(m for m in picked["master_id"] if m))
+    if st.checkbox(f"Mark Manufacturer Discontinued on Master Products ({len(mids)} Master ID(s))",
+                   help="Adds each selected Master ID to the Master Products sheet with Manufacturer "
+                        "Discontinued? = Y and the Manufacturer Discontinued Date = the DNO start date."):
+        disc_mids = mids
+        if not mids:
+            st.warning("The selected listings have no Master IDs, so nothing will be added to Master Products.")
 
 if st.button("Generate UN-DNO File" if undno else "Generate DNO File", type="primary"):
     cfg = {"undno": undno, "temporary": temp, "reason": reason, "start": start, "end": end,
-           "shippable": ship, "sync_inv": sync, "note": note}
+           "shippable": ship, "sync_inv": sync, "note": note, "discontinue_mids": disc_mids}
     try:
         data = core.generate_dno(io.BytesIO(store["bytes"]), listing_ids, cfg)
         out_name = f"{safe_brand}_{sku_count}_UN-DNO.xlsx" if undno else f"{safe_brand}_{sku_count}_{dno_type} DNO.xlsx"

@@ -445,6 +445,50 @@ def generate_dno(template_path, listing_ids, cfg):
         for h, v in values.items():
             ws.cell(row=r, column=header_map[h]).value = v
 
+    if cfg.get("discontinue_mids") and not undno:
+        _mark_manufacturer_discontinued(wb, cfg["discontinue_mids"], start)
+
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def _hkey(s):
+    return "".join(c for c in str(s).lower() if c.isalnum())
+
+
+def _mark_manufacturer_discontinued(wb, mids, date):
+    """Master Products sheet: one row per Master ID, Manufacturer Discontinued? = Y and the
+    Manufacturer Discontinued Date = the DNO start date (same text format as the listing rows)."""
+    if "Master Products" not in wb.sheetnames:
+        raise ValueError("Template must contain a 'Master Products' sheet to mark Manufacturer Discontinued.")
+    ws = wb["Master Products"]
+    header_row, first_data_row = 3, 4
+    found = {}
+    for col in range(1, ws.max_column + 1):
+        # row 3 holds the system names (master_id, is_discontinued, ...), row 2 the friendly labels
+        k = _hkey(ws.cell(row=header_row, column=col).value or "")
+        label = _hkey(ws.cell(row=header_row - 1, column=col).value or "")
+        if k == "masterid":
+            found.setdefault("master_id", col)
+        elif k in ("action", "masteraction"):
+            found.setdefault("action", col)
+        elif k == "isdiscontinued" or ("manufacturerdiscontinued" in label and "date" not in label):
+            found.setdefault("flag", col)
+        elif k == "discontinueddate" or "manufacturerdiscontinueddate" in label:
+            found.setdefault("date", col)
+    missing = [n for n, key in (("Master ID", "master_id"), ("Manufacturer Discontinued?", "flag"),
+                                ("Manufacturer Discontinued Date", "date")) if key not in found]
+    if missing:
+        raise ValueError(f"Template 'Master Products' sheet (headers on row 3) is missing: {missing}")
+
+    for r in range(first_data_row, ws.max_row + 1):  # clear leftovers in the columns we fill
+        for col in found.values():
+            ws.cell(row=r, column=col).value = None
+    for i, mid in enumerate(dict.fromkeys(mids)):
+        r = first_data_row + i
+        if "action" in found:
+            ws.cell(row=r, column=found["action"]).value = "Update Existing"
+        ws.cell(row=r, column=found["master_id"]).value = mid
+        ws.cell(row=r, column=found["flag"]).value = "Y"
+        ws.cell(row=r, column=found["date"]).value = date
